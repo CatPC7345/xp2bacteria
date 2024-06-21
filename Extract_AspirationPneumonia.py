@@ -1,49 +1,45 @@
 import pandas as pd
-from tqdm import tqdm
+from collections import Counter
 
-# adjust here #
-src_csv_path = 'OMU_dpc_merged.csv'
-pneumonia_csv_path = 'OMU_pneumonia.csv'
-keyword_col = '病名'
-include_keywords_val = ['肺炎']
-exclude_keywords_val = ['間質性肺炎', '肺炎の疑い']
-###############
-
-df = pd.read_csv(src_csv_path)
-
-# '病名'を含む列をすべて抽出
-columns_with_byomei = [col for col in df.columns if keyword_col in col]
-
-# '肺炎'を含むが、'間質性肺炎'および'肺炎の疑い'を含まない行を抽出
-def contains_pneumonia_excluding_terms(value):
+def contains_pneumonia_excluding_terms(value, include_keywords_val, exclude_keywords_val):
     if isinstance(value, str):
         includes = any(keyword in value for keyword in include_keywords_val)
         excludes = any(keyword in value for keyword in exclude_keywords_val)
         return includes and not excludes
     return False
 
-# '誤嚥性肺炎'を含むが、'誤嚥性肺炎の疑い'を含まない行をチェック
 def contains_aspiration_pneumonia(value):
     if isinstance(value, str):
         return '誤嚥性肺炎' in value and '誤嚥性肺炎の疑い' not in value
     return False
 
-# 各行に対してチェックを行う
-mask = pd.Series([False] * len(df))
-aspiration_mask = pd.Series([False] * len(df))
+if __name__ == '__main__':
+    src_csv_path = 'dpc.csv'
+    pneumonia_csv_path = 'pneumonia.csv'
+    pneumonia_counts_csv_path = 'pneumonia_counts.csv'
+    keyword_col = '病名'
+    include_keywords_val = ['肺炎']
+    exclude_keywords_val = ['間質性肺炎', '肺炎の疑い']
 
-for col in tqdm(columns_with_byomei):
-    mask = mask | df[col].apply(contains_pneumonia_excluding_terms)
-    aspiration_mask = aspiration_mask | df[col].apply(contains_aspiration_pneumonia)
+    df = pd.read_csv(src_csv_path)
+    columns_with_byomei = [col for col in df.columns if keyword_col in col]
+    mask = pd.Series([False] * len(df))
+    aspiration_mask = pd.Series([False] * len(df))
 
-# マスクを適用してデータをフィルタリング
-filtered_df = df[mask]
+    for col in columns_with_byomei:
+        mask = mask | df[col].apply(contains_pneumonia_excluding_terms, include_keywords_val=include_keywords_val, exclude_keywords_val=exclude_keywords_val)
+        aspiration_mask = aspiration_mask | df[col].apply(contains_aspiration_pneumonia)
 
-# 'aspiration_pneumonia'列を追加
-filtered_df['aspiration_pneumonia'] = aspiration_mask[mask]
+    filtered_df = df[mask].copy()
+    filtered_df.loc[:, 'aspiration_pneumonia'] = aspiration_mask[mask].values
+    pneumonia_counts = Counter()
 
-# 結果を表示または保存
-print(filtered_df)
-filtered_df.to_csv(pneumonia_csv_path, index=False)
+    for col in columns_with_byomei:
+        for value in filtered_df[col].dropna():
+            if contains_pneumonia_excluding_terms(value, include_keywords_val, exclude_keywords_val):
+                pneumonia_counts.update([value])
 
-
+    pneumonia_counts_df = pd.DataFrame(pneumonia_counts.items(), columns=['Type', 'Count'])
+    print(pneumonia_counts_df)
+    pneumonia_counts_df.to_csv(pneumonia_counts_csv_path, index=False)
+    filtered_df.to_csv(pneumonia_csv_path, index=False)
